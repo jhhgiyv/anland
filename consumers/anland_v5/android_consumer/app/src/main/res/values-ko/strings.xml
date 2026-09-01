@@ -99,6 +99,8 @@
     <string name="gesture_scale_hint">터치로 전달되는 제스처(핀치, 세 손가락 이상)는 포인터를 중심으로 이 크기의 정사각형 영역에 매핑됩니다. 값이 클수록 같은 손가락 움직임이 더 멀리 이동합니다.</string>
     <string name="disable_multi_finger_switch">핀치 및 다중 손가락 제스처 비활성화</string>
     <string name="disable_multi_finger_hint">켜짐: 두 손가락 핀치/확대축소 및 세 손가락 이상의 제스처가 무시되어 데스크톱에 전달되지 않습니다. 두 손가락 스크롤과 두 손가락 우클릭은 계속 작동합니다. 꺼짐: 핀치 및 다중 손가락 제스처가 터치로 데스크톱에 전달됩니다.</string>
+    <string name="tap_click_hold_switch">터치패드 클릭 누름 시간 연장</string>
+    <string name="tap_click_hold_hint">탭의 마우스 버튼을 33ms 동안 누른 후 놓습니다. 프레임마다 버튼 상태를 확인하는 게임에 유용하며, 끄면 즉시 클릭합니다.</string>
 
     <!-- Connection -->
     <string name="socket_path_label">데몬 소켓 경로</string>

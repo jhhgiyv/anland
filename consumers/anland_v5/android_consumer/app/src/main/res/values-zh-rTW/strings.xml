@@ -85,6 +85,8 @@
     <string name="pointer_capture_released">外接指標已釋放。點擊桌面畫面即可重新擷取。</string>
     <string name="mouse_sensitivity_label">觸控板指標靈敏度（加速度）</string>
     <string name="mouse_accel_value">%1$.1f 倍</string>
+    <string name="tap_click_hold_switch">延長觸控板點擊按下時間</string>
+    <string name="tap_click_hold_hint">將點擊產生的滑鼠按鍵保持按下 33 毫秒再釋放。適合每幀取樣按鍵狀態的遊戲；關閉時使用即時點擊。</string>
 
     <!-- Connection -->
     <string name="socket_path_label">守護程序 socket 路徑</string>

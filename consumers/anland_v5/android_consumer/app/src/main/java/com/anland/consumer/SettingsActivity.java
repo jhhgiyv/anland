@@ -73,6 +73,7 @@ public class SettingsActivity extends Activity {
     private static final String KEY_POINTER_CAPTURE = "pointer_capture";
     private static final String KEY_SCROLL_SPEED = "scroll_speed";
     private static final String KEY_SCROLL_REVERSE = "scroll_reverse";
+    private static final String KEY_TAP_CLICK_HOLD = MainActivity.KEY_TAP_CLICK_HOLD;
     private static final String KEY_SCROLL_THRESHOLD = "touchpad_scroll_threshold";
     private static final String KEY_MOVE_THRESHOLD = "touchpad_move_threshold";
     private static final String KEY_GESTURE_SCALE = "touchpad_gesture_scale";
@@ -820,6 +821,23 @@ public class SettingsActivity extends Activity {
         disableMultiFingerHint.setTextColor(Color.GRAY);
         disableMultiFingerHint.setPadding(0, dp(4), 0, dp(12));
         root.addView(disableMultiFingerHint);
+
+        Switch tapClickHoldSwitch = new Switch(this);
+        tapClickHoldSwitch.setText(R.string.tap_click_hold_switch);
+        tapClickHoldSwitch.setTextSize(14);
+        tapClickHoldSwitch.setPadding(0, dp(8), 0, 0);
+        tapClickHoldSwitch.setChecked(prefs.getBoolean(KEY_TAP_CLICK_HOLD, false));
+        tapClickHoldSwitch.setOnCheckedChangeListener((v, checked) ->
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                        .putBoolean(KEY_TAP_CLICK_HOLD, checked).apply());
+        root.addView(tapClickHoldSwitch);
+
+        TextView tapClickHoldHint = new TextView(this);
+        tapClickHoldHint.setText(R.string.tap_click_hold_hint);
+        tapClickHoldHint.setTextSize(12);
+        tapClickHoldHint.setTextColor(Color.GRAY);
+        tapClickHoldHint.setPadding(0, dp(4), 0, dp(12));
+        root.addView(tapClickHoldHint);
 
         addFloatSlider(root, R.string.scroll_speed_label, R.string.scroll_speed_value,
                 null, KEY_SCROLL_SPEED, 0.05f, 3.0f, 0.05f, 0.5f);

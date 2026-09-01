@@ -206,6 +206,9 @@ public final class Touchpad {
     // hardware taps already arrive as separate clicks, so emitting a second
     // synthetic pair there would turn two taps into three clicks.
     private final boolean synthesizeDoubleTap;
+    // The delayed click behavior is opt-in; disabled preserves the original
+    // immediate button down/up pair.
+    private boolean tapClickHoldEnabled = false;
 
     Touchpad(Context context, Output output, boolean synthesizeDoubleTap) {
         this.output = output;
@@ -213,6 +216,14 @@ public final class Touchpad {
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
         setGestureThresholds(DEFAULT_SCROLL_THRESHOLD_FACTOR,
                 DEFAULT_MOVE_THRESHOLD_FACTOR);
+    }
+
+    void setTapClickHoldEnabled(boolean enabled) {
+        if (tapClickHoldEnabled == enabled)
+            return;
+        if (!enabled)
+            cancelPendingTapClicks();
+        tapClickHoldEnabled = enabled;
     }
 
     /**
@@ -744,6 +755,26 @@ public final class Touchpad {
                 if (currentState == STATE_ONE_FINGER && isSingleTapCandidate && isQuickTap) {
                     long gap = event.getEventTime() - lastTapTime;
                     float dist = (float) Math.hypot(lastX1 - lastTapX, lastY1 - lastTapY);
+                    if (!tapClickHoldEnabled) {
+                        if (synthesizeDoubleTap && gap < 300 && dist < touchSlop
+                                && !isDoubleTapPending) {
+                            sendButton(0x110, true);
+                            sendButton(0x110, false);
+                            sendButton(0x110, true);
+                            sendButton(0x110, false);
+                            lastTapTime = 0;
+                        } else {
+                            sendButton(0x110, true);
+                            sendButton(0x110, false);
+                            lastTapTime = event.getEventTime();
+                            lastTapX = lastX1;
+                            lastTapY = lastY1;
+                        }
+                        isDoubleTapPending = false;
+                        resetTouchpadState();
+                        resetSmoothing();
+                        return true;
+                    }
                     if (synthesizeDoubleTap && gap < 300 && dist < touchSlop
                             && !isDoubleTapPending) {
                         isDoubleTapPending = true;

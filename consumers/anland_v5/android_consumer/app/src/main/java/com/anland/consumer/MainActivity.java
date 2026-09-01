@@ -135,6 +135,7 @@ public class MainActivity extends Activity
     // Two-finger scroll tuning, shared by the on-screen and captured touchpads.
     public static final String KEY_SCROLL_SPEED = "scroll_speed";
     public static final String KEY_SCROLL_REVERSE = "scroll_reverse";
+    public static final String KEY_TAP_CLICK_HOLD = "touchpad_tap_click_hold";
     // Multiples of touchSlop; see Touchpad.setGestureThresholds.
     public static final String KEY_SCROLL_THRESHOLD = "touchpad_scroll_threshold";
     public static final String KEY_MOVE_THRESHOLD = "touchpad_move_threshold";
@@ -784,6 +785,7 @@ public class MainActivity extends Activity
                 Touchpad.DEFAULT_GESTURE_SCALE));
         pad.setMultiFingerGesturesDisabled(
                 prefs.getBoolean(KEY_DISABLE_MULTI_FINGER_GESTURES, false));
+        pad.setTapClickHoldEnabled(prefs.getBoolean(KEY_TAP_CLICK_HOLD, false));
     }
 
     /**
