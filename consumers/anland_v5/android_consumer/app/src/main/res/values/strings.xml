@@ -100,7 +100,7 @@
     <string name="disable_multi_finger_switch">Disable pinch and multi-finger gestures</string>
     <string name="disable_multi_finger_hint">ON: two-finger pinch/zoom and three-or-more-finger gestures are swallowed and never reach the desktop; two-finger scrolling and two-finger right-click still work. OFF: pinch and multi-finger gestures are forwarded to the desktop as touch.</string>
     <string name="tap_click_hold_switch">Hold touchpad clicks briefly</string>
-    <string name="tap_click_hold_hint">Keeps a tap's mouse button down for 33 ms before releasing it. Enable this for games that sample button state once per frame; disabled uses immediate clicks.</string>
+    <string name="tap_click_hold_hint">Keeps the mouse button down for 33 ms after a tap before releasing it. Enable this for games that sample button state once per frame; disabled uses immediate clicks.</string>
 
     <!-- Connection -->
     <string name="socket_path_label">Daemon socket path</string>
