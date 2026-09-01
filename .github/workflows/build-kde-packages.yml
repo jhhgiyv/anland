@@ -242,7 +242,7 @@ jobs:
               esac
               [ -n "$kwin_version" ] || { echo 'Unable to resolve KWin version' >&2; exit 1; }
               printf '%s\n' "$kwin_version" > /tmp/kde-packages/.kwin-version
-            ANLAND_BUILD
+          ANLAND_BUILD
 
       - name: Package build artifacts
         id: package
