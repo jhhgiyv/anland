@@ -37,6 +37,7 @@ namespace KWin
 
 class AnlandOutput;
 class AnlandInputDevice;
+class AnlandConsumerStatusAdaptor;
 class AbstractDataSource;
 class DrmDevice;
 class EglDisplay;
@@ -109,6 +110,9 @@ private:
     QPointF mapInputDeltaToLogical(const QPointF &deviceDelta) const;
     void onReconnectTimer();
     void enterFallback();
+    void initializeDbus();
+    void teardownDbus();
+    void setConsumerActive(bool active);
 
     void onClipboardChanged();
     void sendClipboardToConsumer(const QByteArray &text);
@@ -146,6 +150,9 @@ private:
     QSocketNotifier *m_inputNotifier = nullptr;
     QSocketNotifier *m_bufReadyNotifier = nullptr;
     QTimer *m_reconnectTimer = nullptr;
+    AnlandConsumerStatusAdaptor *m_consumerStatus = nullptr;
+    bool m_dbusObjectRegistered = false;
+    bool m_dbusServiceRegistered = false;
 
     bool m_consumerReady = false;
     bool m_inFallback = false;

@@ -2,6 +2,8 @@ package com.anland.consumer;
 
 import android.content.Context;
 import android.graphics.Matrix;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
@@ -78,9 +80,39 @@ public final class Touchpad {
     private boolean isDoubleTapPending = false;
 
     private static final long TOUCH_LONG_PRESS_TIMEOUT = 500;
+    // A short tap is recognized on ACTION_UP. Keep its generated mouse press
+    // alive long enough for games which sample button state once per frame.
+    private static final long TAP_CLICK_HOLD_MS = 33;
+    private static final long TAP_CLICK_GAP_MS = 1;
     private boolean hasLongPressed = false;
     private boolean isLongPressPossible = false;
     private boolean isMultiFinger = false;
+
+    private final Handler tapClickHandler = new Handler(Looper.getMainLooper());
+    private int queuedTapClicks = 0;
+    private boolean tapClickDown = false;
+    private final Runnable tapClickStart = new Runnable() {
+        @Override
+        public void run() {
+            if (tapClickDown || queuedTapClicks == 0)
+                return;
+            queuedTapClicks--;
+            tapClickDown = true;
+            sendButton(0x110, true);
+            tapClickHandler.postDelayed(tapClickRelease, TAP_CLICK_HOLD_MS);
+        }
+    };
+    private final Runnable tapClickRelease = new Runnable() {
+        @Override
+        public void run() {
+            if (!tapClickDown)
+                return;
+            sendButton(0x110, false);
+            tapClickDown = false;
+            if (queuedTapClicks != 0)
+                tapClickHandler.postDelayed(tapClickStart, TAP_CLICK_GAP_MS);
+        }
+    };
 
     // Two-finger classification, decided once per two-finger phase so a gesture
     // cannot oscillate between scrolling and being declined.
@@ -257,6 +289,7 @@ public final class Touchpad {
 
     /** Cancel an in-progress gesture, e.g. when the capture window loses focus. */
     void cancel() {
+        cancelPendingTapClicks();
         releaseForwardedTouches();
         if (isDraggingActive)
             sendButton(0x110, false);
@@ -430,6 +463,21 @@ public final class Touchpad {
     private void sendButton(int button, boolean pressed) {
         if (output != null)
             output.onButton(button, pressed);
+    }
+
+    private void queueTapClick() {
+        queuedTapClicks++;
+        if (!tapClickDown)
+            tapClickStart.run();
+    }
+
+    private void cancelPendingTapClicks() {
+        tapClickHandler.removeCallbacks(tapClickStart);
+        tapClickHandler.removeCallbacks(tapClickRelease);
+        queuedTapClicks = 0;
+        if (tapClickDown)
+            sendButton(0x110, false);
+        tapClickDown = false;
     }
 
     private void sendScroll(int axis, float value) {
@@ -699,15 +747,12 @@ public final class Touchpad {
                     if (synthesizeDoubleTap && gap < 300 && dist < touchSlop
                             && !isDoubleTapPending) {
                         isDoubleTapPending = true;
-                        sendButton(0x110, true);
-                        sendButton(0x110, false);
-                        sendButton(0x110, true);
-                        sendButton(0x110, false);
+                        queueTapClick();
+                        queueTapClick();
                         isDoubleTapPending = false;
                         lastTapTime = 0;
                     } else {
-                        sendButton(0x110, true);
-                        sendButton(0x110, false);
+                        queueTapClick();
                         lastTapTime = event.getEventTime();
                         lastTapX = lastX1;
                         lastTapY = lastY1;
@@ -722,6 +767,7 @@ public final class Touchpad {
                 break;
             }
             case MotionEvent.ACTION_CANCEL: {
+                cancelPendingTapClicks();
                 if (isDraggingActive) {
                     sendButton(0x110, false);
                     isDraggingActive = false;

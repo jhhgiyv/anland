@@ -7,6 +7,7 @@
 #include "anland_backend.h"
 #include "anland_audio.h"
 #include "anland_camera.h"
+#include "anland_dbus.h"
 #include "anland_egl_backend.h"
 #include "anland_input.h"
 #include "anland_logging.h"
@@ -28,6 +29,8 @@
 #include "workspace.h"
 
 #include <QFutureWatcher>
+#include <QDBusConnection>
+#include <QDBusError>
 #include <QScopeGuard>
 #include <QSocketNotifier>
 #include <QTimer>
@@ -89,6 +92,54 @@ static void detachAudioBeforeConsumerRelease(void *)
     anland_audio_set_fd(-1);
 }
 
+void AnlandBackend::initializeDbus()
+{
+    m_consumerStatus = new AnlandConsumerStatusAdaptor(this);
+
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) {
+        qCWarning(KWIN_ANLAND) << "session D-Bus is unavailable; consumer status will not be exported";
+        return;
+    }
+
+    if (!bus.registerService(QStringLiteral("org.anland.Consumer"))) {
+        qCWarning(KWIN_ANLAND) << "failed to register D-Bus service org.anland.Consumer:"
+                               << bus.lastError().message();
+        return;
+    }
+    m_dbusServiceRegistered = true;
+
+    if (!bus.registerObject(QStringLiteral("/org/anland/Consumer"), this,
+                            QDBusConnection::ExportAdaptors)) {
+        qCWarning(KWIN_ANLAND) << "failed to register D-Bus object /org/anland/Consumer:"
+                               << bus.lastError().message();
+        bus.unregisterService(QStringLiteral("org.anland.Consumer"));
+        m_dbusServiceRegistered = false;
+        return;
+    }
+    m_dbusObjectRegistered = true;
+}
+
+void AnlandBackend::teardownDbus()
+{
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (m_dbusObjectRegistered) {
+        bus.unregisterObject(QStringLiteral("/org/anland/Consumer"));
+        m_dbusObjectRegistered = false;
+    }
+    if (m_dbusServiceRegistered) {
+        bus.unregisterService(QStringLiteral("org.anland.Consumer"));
+        m_dbusServiceRegistered = false;
+    }
+}
+
+void AnlandBackend::setConsumerActive(bool active)
+{
+    if (m_consumerStatus) {
+        m_consumerStatus->setActive(active);
+    }
+}
+
 AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
     : OutputBackend(parent)
     , m_socketPath(socketPath.isEmpty() ? s_defaultSocketPath : socketPath)
@@ -97,6 +148,8 @@ AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
 
 AnlandBackend::~AnlandBackend()
 {
+    setConsumerActive(false);
+    teardownDbus();
     teardownNotifiers();
     // Stop the audio engine before disconnect() closes the audio fd it borrows.
     anland_audio_stop();
@@ -124,6 +177,7 @@ bool AnlandBackend::initialize()
 
     set_pre_release_callback(m_display, detachAudioBeforeConsumerRelease, nullptr);
     set_fallback_callback(m_display, &AnlandBackend::fallbackTrampoline, this);
+    initializeDbus();
 
     uint32_t w = 0, h = 0, fmt = 0, refresh = 0;
     get_screen_info(m_display, &w, &h, &fmt, &refresh);
@@ -484,6 +538,7 @@ void AnlandBackend::enterFallback()
 
     m_consumerReady = false;
     m_inFallback = true;
+    setConsumerActive(false);
 
     // Audio is already detached: startup has no consumer socket, and a consumer
     // loss detaches the source before display_producer closes its borrowed fd.
@@ -512,6 +567,7 @@ void AnlandBackend::onReconnectTimer()
     m_inFallback = false;
     m_consumerReady = false;
     m_reconnectTimer->stop();
+    setConsumerActive(true);
 
     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
     // layer (which arms an infinite/full-output repaint on every rotation buffer),

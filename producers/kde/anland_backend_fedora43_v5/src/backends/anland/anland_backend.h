@@ -38,6 +38,7 @@ namespace KWin
 
 class AnlandOutput;
 class AnlandInputDevice;
+class AnlandConsumerStatusAdaptor;
 class BackendOutput;
 class DrmDevice;
 class EglBackend;
@@ -99,6 +100,9 @@ private:
     QPointF mapInputToLogical(const QPointF &devicePoint) const;
     void onReconnectTimer();
     void enterFallback();
+    void initializeDbus();
+    void teardownDbus();
+    void setConsumerActive(bool active);
 
     // Clipboard sync — bidirectional bridge between KWin selection / consumer
     void onClipboardChanged();
@@ -138,6 +142,9 @@ private:
     QSocketNotifier *m_inputNotifier = nullptr;
     QSocketNotifier *m_bufReadyNotifier = nullptr;
     QTimer *m_reconnectTimer = nullptr;
+    AnlandConsumerStatusAdaptor *m_consumerStatus = nullptr;
+    bool m_dbusObjectRegistered = false;
+    bool m_dbusServiceRegistered = false;
 
     bool m_consumerReady = false;
     bool m_inFallback = false;
