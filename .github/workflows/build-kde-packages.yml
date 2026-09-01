@@ -1,0 +1,306 @@
+name: Build Anland KDE Packages
+
+run-name: Anland KDE packages ${{ inputs.anland_ref || github.ref_name }} (${{ inputs.build_target || 'all' }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: KDE package target to build
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - ubuntu2604
+          - Debian13
+          - Fedora43
+          - Fedora44
+          - Arch
+      anland_ref:
+        description: Branch, tag, or commit of this Anland repository to build
+        required: true
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve Anland source revision
+    runs-on: ubuntu-latest
+    outputs:
+      anland_commit: ${{ steps.resolve.outputs.anland_commit }}
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Resolve build matrix
+        id: targets
+        env:
+          BUILD_TARGET_INPUT: ${{ inputs.build_target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$BUILD_TARGET_INPUT" in
+            all)
+              targets='["ubuntu2604","Debian13","Fedora43","Fedora44","Arch"]'
+              ;;
+            ubuntu2604|Debian13|Fedora43|Fedora44|Arch)
+              targets="[\"$BUILD_TARGET_INPUT\"]"
+              ;;
+            *)
+              echo "Unsupported build target: $BUILD_TARGET_INPUT" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+      - name: Check out requested Anland revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.anland_ref }}
+          fetch-depth: 1
+
+      - name: Resolve revision to an immutable commit
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          anland_commit="$(git rev-parse HEAD)"
+          git cat-file -e "${anland_commit}^{commit}"
+          echo "anland_commit=$anland_commit" >> "$GITHUB_OUTPUT"
+          echo "Building this repository at $anland_commit"
+
+  build:
+    name: Build ${{ matrix.target }} KDE packages
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.prepare.outputs.targets) }}
+
+    env:
+      ANLAND_COMMIT: ${{ needs.prepare.outputs.anland_commit }}
+      BUILD_TARGET: ${{ matrix.target }}
+
+    steps:
+      - name: Check out the resolved Anland revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.anland_commit }}
+          fetch-depth: 1
+
+      - name: Resolve package build settings
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$BUILD_TARGET" in
+            ubuntu2604)
+              image=ubuntu:26.04
+              script=producers/kde/ubuntu2604_v5/build.sh
+              package_pattern='*.deb'
+              asset_arch=arm64
+              ;;
+            Debian13)
+              image=debian:trixie
+              script=producers/kde/Debian13_v5/build.sh
+              package_pattern='*.deb'
+              asset_arch=arm64
+              ;;
+            Fedora43)
+              image=fedora:43
+              script=producers/kde/Fedora43_v5/build.sh
+              package_pattern='*.rpm'
+              asset_arch=aarch64
+              ;;
+            Fedora44)
+              image=fedora:44
+              script=producers/kde/Fedora43_v5/build.sh
+              package_pattern='*.rpm'
+              asset_arch=aarch64
+              ;;
+            Arch)
+              image=ogarcia/archlinux:latest
+              script=producers/kde/Arch_v5/build.sh
+              package_pattern='*.pkg.tar.*'
+              asset_arch=aarch64
+              ;;
+            *)
+              echo "Unsupported build target: $BUILD_TARGET" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "image=$image"
+            echo "script=$script"
+            echo "package_pattern=$package_pattern"
+            echo "asset_arch=$asset_arch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build packages in the target distribution container
+        env:
+          DISTRO_IMAGE: ${{ steps.target.outputs.image }}
+          BUILD_SCRIPT: ${{ steps.target.outputs.script }}
+          PKG_PATTERN: ${{ steps.target.outputs.package_pattern }}
+          OUTPUT_DIR: .kde-package-build/${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+
+          docker run --rm -i \
+            --platform linux/arm64 \
+            -e BUILD_SCRIPT \
+            -e BUILD_TARGET \
+            -v "$GITHUB_WORKSPACE:/tmp/anland:ro" \
+            -v "$GITHUB_WORKSPACE/$OUTPUT_DIR:/root/kde-packages" \
+            -v "$GITHUB_WORKSPACE/$OUTPUT_DIR:/tmp/kde-packages" \
+            "$DISTRO_IMAGE" \
+            bash -s <<'ANLAND_BUILD'
+              set -euo pipefail
+
+              case "$BUILD_TARGET" in
+                Debian13|ubuntu2604)
+                  apt-get update
+                  apt-get install -y --no-install-recommends \
+                    ca-certificates sudo \
+                    build-essential devscripts dpkg-dev fakeroot patch
+                  ;;
+                Fedora43|Fedora44)
+                  dnf install -y --setopt=install_weak_deps=False \
+                    ca-certificates sudo \
+                    dnf-plugins-core rpmdevtools rpm-build patch tar xz
+                  ;;
+                Arch)
+                  pacman -Syu --noconfirm
+                  pacman -S --noconfirm --needed base-devel ca-certificates sudo
+                  useradd -m -s /bin/bash anland
+                  printf 'anland ALL=(root) NOPASSWD: /usr/bin/pacman\n' > /etc/sudoers.d/anland-pacman
+                  chmod 0440 /etc/sudoers.d/anland-pacman
+                  if grep -q '^#PACMAN_AUTH=()' /etc/makepkg.conf; then
+                    sed -i 's/^#PACMAN_AUTH=().*/PACMAN_AUTH=(sudo)/' /etc/makepkg.conf
+                  else
+                    printf '\nPACMAN_AUTH=(sudo)\n' >> /etc/makepkg.conf
+                  fi
+                  chown -R anland:anland /tmp/kde-packages
+                  ;;
+              esac
+
+              test -f "/tmp/anland/$BUILD_SCRIPT"
+
+              # Debian 13 stores its repositories in DEB822 format. Enable
+              # source repositories before the build script calls apt source.
+              if [ "$BUILD_TARGET" = Debian13 ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then
+                sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+                apt-get update
+              fi
+
+              if [ "$BUILD_TARGET" = Arch ]; then
+                su -s /bin/bash anland -c \
+                  "cd /tmp/anland/$(dirname "$BUILD_SCRIPT") && INSTALL=0 WORKDIR=/tmp/kde-packages ./$(basename "$BUILD_SCRIPT") --noconfirm"
+                chmod -R a+rwX /tmp/kde-packages
+              else
+                cd "/tmp/anland/$(dirname "$BUILD_SCRIPT")"
+                WORKDIR=/root/kde-packages "./$(basename "$BUILD_SCRIPT")"
+              fi
+
+              # The package scripts build the distro's current KWin version.
+              # Read it from the generated main KWin package for the artifact name.
+              kwin_package=''
+              kwin_version=''
+              case "$BUILD_TARGET" in
+                Debian13|ubuntu2604)
+                  kwin_package="$(find /tmp/kde-packages -type f -name 'kwin-wayland_*.deb' -print | sort | head -n1)"
+                  if [ -z "$kwin_package" ]; then
+                    kwin_package="$(find /tmp/kde-packages -type f -name 'kwin-x11_*.deb' -print | sort | head -n1)"
+                  fi
+                  [ -n "$kwin_package" ] || { echo 'KWin deb package not found' >&2; exit 1; }
+                  kwin_version="$(dpkg-deb -f "$kwin_package" Version)"
+                  ;;
+                Fedora43|Fedora44)
+                  kwin_package="$(find /tmp/kde-packages -type f -name 'kwin-[0-9]*.rpm' -print | sort | head -n1)"
+                  [ -n "$kwin_package" ] || { echo 'KWin rpm package not found' >&2; exit 1; }
+                  kwin_version="$(rpm -qp --queryformat '%{VERSION}' "$kwin_package")"
+                  ;;
+                Arch)
+                  kwin_package="$(find /tmp/kde-packages -type f -name 'kwin-[0-9]*.pkg.tar.*' -print | sort | head -n1)"
+                  [ -n "$kwin_package" ] || { echo 'KWin Arch package not found' >&2; exit 1; }
+                  kwin_version="$(pacman -Qp "$kwin_package" | awk 'NR == 1 { print $2 }')"
+                  ;;
+              esac
+              kwin_version="${kwin_version#*:}"
+              case "$BUILD_TARGET" in
+                Debian13|ubuntu2604|Arch) kwin_version="${kwin_version%-*}" ;;
+              esac
+              [ -n "$kwin_version" ] || { echo 'Unable to resolve KWin version' >&2; exit 1; }
+              printf '%s\n' "$kwin_version" > /tmp/kde-packages/.kwin-version
+            ANLAND_BUILD
+
+      - name: Package build artifacts
+        id: package
+        env:
+          PKG_PATTERN: ${{ steps.target.outputs.package_pattern }}
+          ASSET_ARCH: ${{ steps.target.outputs.asset_arch }}
+          OUTPUT_DIR: .kde-package-build/${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_dir="$RUNNER_TEMP/anland-kde-packages"
+          rm -rf "$package_dir"
+          mkdir -p "$package_dir"
+
+          copy_packages() {
+            local source_dir="$1"
+            [ -d "$source_dir" ] || return 0
+            find "$source_dir" -maxdepth 1 -type f -name "$PKG_PATTERN" \
+              ! -name '*debug*' ! -name '*dbgsym*' ! -name '*.src.*' \
+              ! -name 'kwin-dev_*' ! -name 'kwin-devel-*' ! -name 'kwin-doc-*' \
+              ! -name 'xorg-x11-server-Xwayland-devel-*' -exec cp -v {} "$package_dir/" \;
+          }
+
+          if [ "$BUILD_TARGET" = Arch ]; then
+            copy_packages "$OUTPUT_DIR"
+          else
+            copy_packages "$OUTPUT_DIR/kwin"
+            copy_packages "$OUTPUT_DIR/xwayland"
+            copy_packages "$OUTPUT_DIR/xorg-x11-server-Xwayland"
+          fi
+
+          package_count="$(find "$package_dir" -maxdepth 1 -type f -name "$PKG_PATTERN" | wc -l)"
+          [ "$package_count" -gt 0 ] || {
+            echo "No installable packages were collected for $BUILD_TARGET" >&2
+            exit 1
+          }
+
+          kwin_version="$(tr -d '[:space:]' < "$OUTPUT_DIR/.kwin-version")"
+          case "$kwin_version" in
+            ''|*[!A-Za-z0-9.+~_-]*)
+              echo "Unsupported KWin version in artifact name: $kwin_version" >&2
+              exit 1
+              ;;
+          esac
+
+          asset_name="anland-kde-${BUILD_TARGET,,}-kwin-${kwin_version}-${ASSET_ARCH}.tar.gz"
+          asset_path="$RUNNER_TEMP/$asset_name"
+          printf 'target=%s\nsource_commit=%s\nkwin_version=%s\n' \
+            "$BUILD_TARGET" "$ANLAND_COMMIT" "$kwin_version" > "$package_dir/.anland-kde-build-info"
+          tar -C "$RUNNER_TEMP" -czf "$asset_path" anland-kde-packages
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+          echo "Collected $package_count packages into $asset_name"
+
+      - name: Upload KDE package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: anland-kde-package-${{ matrix.target }}
+          path: ${{ steps.package.outputs.asset_path }}
+          if-no-files-found: error
+          retention-days: 7
